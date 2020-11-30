@@ -41,7 +41,6 @@ type
     N2: TMenuItem;
     menDelLine: TMenuItem;
     sb1: TStatusBar;
-    SpeedButton1: TSpeedButton;
     menDeZeroSpalte: TMenuItem;
     menSynthDiffRad: TMenuItem;
     btnLoad: TButton;
@@ -54,6 +53,8 @@ type
     btnLoadFillGapSave: TButton;
     Label3: TLabel;
     Label4: TLabel;
+    cmbAvInterval: TComboBox;
+    btnAverage: TButton;
     procedure FormCreate(Sender: TObject);
     procedure bbnSaveClick(Sender: TObject);
     (* procedure feInputAfterDialog(Sender: TObject; var Name: string;
@@ -65,7 +66,10 @@ type
     procedure btnLoadClick(Sender: TObject);
     procedure btnFillGapsClick(Sender: TObject);
     procedure btnLoadFillGapSaveClick(Sender: TObject);
-procedure Fillgaps;
+    procedure Fillgaps;
+    procedure btnAverageClick(Sender: TObject);
+    procedure cmbFiletypeChange(Sender: TObject);
+    Function dNextTimeStamp(dTS: TDateTime): TDateTime;
   private
     fIn, fOut: Text;
     _iPos, _iError, _iFileNo: integer;
@@ -84,7 +88,7 @@ var
 
 implementation
 
-uses fMsgWin, mGlobProc_B;
+uses fMsgWin, mGlobProc_B, fAvTable;
 
 {$R *.dfm}
 (* *************************************************************************** *)
@@ -117,6 +121,8 @@ begin
     feInput.InitialDir := ReadString('Mediator', 'InputDir', 'c:\');
     deSource.Text := ReadString('Mediator', 'SourceDir', 'c:\');
     deSource.InitialDir := deSource.Text;
+    cmbFiletype.ItemIndex := ReadInteger('Mediator', 'FileType', -1);
+    cmbFiletype.OnChange(self);
     // fpm1.RestoreFormPlacement;
     free;
   end;
@@ -127,11 +133,12 @@ end;
 (* *************************************************************************** *)
 
 procedure TfrmMediator.bbnSaveClick(Sender: TObject);
-var sDir, sFN, sExt:string;
+var
+  sDir, sFN, sExt: string;
 begin
   SaveDialog1.InitialDir := sGlobDataDir;
-  AnalyseFileName(feInput.FileName,sDir,sFN,sExt);
-  SaveDialog1.FileName := sDir+'\'+sFN+'_1.'+sExt;
+  AnalyseFileName(feInput.FileName, sDir, sFN, sExt);
+  SaveDialog1.FileName := sDir + '\' + sFN + '_1.' + sExt;
   if SaveDialog1.Execute then
     if FileExists(SaveDialog1.FileName) then
       if MessageDlg('File exists! Overwrite?', mtConfirmation, [mbYes, mbNo], 0)
@@ -163,11 +170,14 @@ begin
   case cmbInterval.ItemIndex of
     0:
       iInterval := 10;
+    1:
+      iInterval := 60; // s
   end;
   // iInterval := StrToInt(cmbInterval.text);
   Assignfile(fIn, sFN);
   reset(fIn);
-  readln(fIn, sLine); // erste Zeile ist Legende
+  readln(fIn, sLine);
+  // erste Zeile ist Legende
   // Trenner analysieren
   if pos(';', sLine) <> 0 then
     cDelimiter := ';';
@@ -182,25 +192,28 @@ begin
     free;
   end;
   _slsFieldType.Clear;
-  if _iFileNo = 1 then
+  cgdWerte.RowCount := 2;
+
+  cgdWerte.ClearGrid;
+  Application.ProcessMessages;
+  // if _iFileNo = 1 then
+  // begin
+  cgdWerte.ColCount := 2;
+  cgdWerte.RowCount := 2;
+  cgdWerte.ColWidths[0] := 140;
+  cgdWerte.ColWidths[1] := 120;
+
+  iC := 0;
+  while sLine <> '' do
   begin
-    cgdWerte.ClearGrid;
-    cgdWerte.ColCount := 2;
-    cgdWerte.RowCount := 2;
-    cgdWerte.ColWidths[0] := 140;
-    cgdWerte.ColWidths[1] := 120;
-
-    iC := 0;
-    while sLine <> '' do
-    begin
-      cgdWerte.Cells[iC, 0] := sToken(sLine, [cDelimiter], true);
-      inc(iC);
-      cgdWerte.ColCount := cgdWerte.ColCount + 1;
-    end;
-
-    cgdWerte.ColCount := cgdWerte.ColCount - 2;
-    cgdWerte.RowCount := 2;
+    cgdWerte.Cells[iC, 0] := sToken(sLine, [cDelimiter], true);
+    inc(iC);
+    cgdWerte.ColCount := cgdWerte.ColCount + 1;
   end;
+
+  cgdWerte.ColCount := cgdWerte.ColCount - 2;
+  cgdWerte.RowCount := 2;
+  // end;
 
   readln(fIn, sLine); // zweite Zeile analysieren
 
@@ -244,14 +257,17 @@ begin
   iLineNo := 1;
   iR := 0;
   reset(fIn);
-  readln(fIn); // erste zeile verwerfen
+  readln(fIn);
+  // erste zeile verwerfen
 
   while not EOF(fIn) do
   begin
-    readln(fIn, sLine1); // nächste Zeile analysieren
+    readln(fIn, sLine1);
+    // nächste Zeile analysieren
 
     iC := 0;
     cgdWerte.RowCount := cgdWerte.RowCount + 1;
+    cgdWerte.RowColor[cgdWerte.RowCount] := clWindow;
     inc(iR);
 
     while sLine1 <> '' do
@@ -273,7 +289,8 @@ begin
 
           else
           begin
-            dDiff := dTime - dLastDate - 10 / (24 * 3600);
+            // dDiff := dTime - dLastDate - 10 / (24 * 3600);
+            dDiff := dTime - dLastDate - iInterval / (24 * 3600);
             while (dDiff > 0.0001) do
             begin
               inc(iNumberOfGaps);
@@ -301,16 +318,19 @@ begin
         // showmessage(FormatDateTime('hh:nn:ss', dTime));
 
       end;
-      if _slsFieldType[iC] = 'Integer' then
+      if cgdWerte.RowColor[iR] <> clRed then
       begin
-        cgdWerte.Cells[iC, iR] := s1;
-        _aPrecision[iC] := 0;
-      end;
-      if _slsFieldType[iC] = 'Extended' then
-      begin
-        cgdWerte.Cells[iC, iR] := s1;
-        sToken(s1, ['.'], true);
-        _aPrecision[iC] := length(s1);
+        if _slsFieldType[iC] = 'Integer' then
+        begin
+          cgdWerte.Cells[iC, iR] := s1;
+          _aPrecision[iC] := 0;
+        end;
+        if _slsFieldType[iC] = 'Extended' then
+        begin
+          cgdWerte.Cells[iC, iR] := s1;
+          sToken(s1, ['.'], true);
+          _aPrecision[iC] := length(s1);
+        end;
       end;
 
       inc(iC);
@@ -332,152 +352,13 @@ begin
       end;
     }
     inc(iLineNo);
+
   end;
-
-  {
-
-    slsLegende.free;
-    cgdWerte.ColCount := slsLegende.Count + 1;
-
-    for i := 1 to slsLegende.Count - 1 do
-    cgdWerte.Cells[i, 0] := slsLegende[i - 1];
-
-
-    // in welcher spalte steht die Zeit
-    iTimeCol := 0;
-
-    repeat
-    inc(iTimeCol);
-    sDatum := sToken(sLine, [cDelimiter], true);
-    //   if lStrIsDateTime(sDatum) then showmessage('Date');
-
-    try
-    dTime := StrToDateTime(sDatum);
-    //      showmessage(FormatDateTime('hh:nn:ss',dTime));
-    //    showmessage(FloatToStr(dTime);
-    //    showmessage(IntToStr(minuteof(dTime)));
-    iOldMin := minuteof(dTime) + 60 * HourOf(dTime);
-    i := trunc(minuteof(dTime) / iInterval) + 1;
-    iNextMin := i * iInterval + 60 * HourOf(dTime);
-    //      Showmessage(IntToStr(iOldMin)+ '  '+IntToStr(iNextMin));
-    dNextInterval := trunc(dTime) + iNextMin / (24 * 60);
-    //   showmessage(FormatDateTime('dd.mm.yyyy hh:nn:ss',dNextInterval));
-    bOK := true;
-    except
-    end;
-    until bOK;
-    iNumCount := 0; // so viele Spalten gibt es
-    while sLine <> '' do begin
-    s1 := stoken(sLine, [cDelimiter], true); // datum weg
-    if lStrIsExtended(s1) then inc(iNumCount);
-    end;
-    //   ShowMessage(IntToStr(iNumCount));
-    SetLength(aValues, iNumCount);
-
-    // jettzt gehts los
-    reset(fIn);
-    readln(fIn, sLine); // erste Zeile ist Legende
-    iLineCount := 0;
-    while not eof(fIn) do begin
-    readln(fIn, sLine);
-    i := 1;
-    while i < iTimeCol do begin
-    stoken(sLine, [cDelimiter], true); // ggf Laufnummern weg
-    inc(i);
-    end;
-    sDatum := sToken(sLine, [cDelimiter], true);
-    dTime := StrToDateTime(sDatum);
-    //     showmessage(FloatToStr(dTime));
-
-    iC := 1;
-
-    //   iMin := minuteof(dTime) + 60 * HourOf(dTime);
-    fDate := trunc(dTime);
-
-    // Falls eine neue Minute anbricht => alte wegschreiben
-
-    //   if iMin <> iOldMin then begin
-    if dTime > dNextInterval then begin
-    if iCount > 0 then begin
-
-    //    dTime := iMin / (24 * 60) + fDate;
-    if dNextInterval <= 1.0 then
-    sDatum := FormatDateTime('hh:nn:ss', dNextInterval)
-    else
-    sDatum := FormatDateTime('dd.mm.yyyy hh:nn:ss', dNextInterval);
-    cgdWerte.RowCount := cgdWerte.RowCount + 1;
-    iR := cgdWerte.RowCount - 2;
-    cgdWerte.Cells[0, iR] := IntToStr(iR);
-    cgdWerte.Cells[1, iR] := sDatum;
-    for i := 0 to iNumCount - 1 do begin
-    aValues[i] := aValues[i] / iCount;
-    cgdWerte.Cells[i + 2, iR] := FloatToStr(aValues[i]);
-    aValues[i] := 0;
-    end;
-    iCount := 0;
-  }
-
-  { //fSum := iSum / iCount;
-    //fUVSum := iUVSum / iCount;
-    iC := 1;
-    inc(iR);
-    if iR > 1 then
-    cgdWerte.RowCount := cgdWerte.RowCount + 1;
-    cgdWerte.Cells[0, iR] := IntToStr(cgdWerte.RowCount - 1);
-    while sLine <> '' do begin
-    case iC of
-    1: begin end;
-    12: begin
-    cgdWerte.Cells[iC, iR] := Format('%.0f', [fSum]);
-    sToken(sLine, [';'], true);
-    end;
-
-    17: begin
-    cgdWerte.Cells[iC, iR] := Format('%.0f', [fUVSum]);
-    sToken(sLine, [';'], true);
-    end;
-    else cgdWerte.Cells[iC, iR] := sToken(sLine, [cDelimiter], true);
-    end;
-    inc(iC);
-
-    end;
-  }{
-    end;
-    i := trunc(minuteof(dTime) / iInterval) + 1;
-    iNextMin := i * iInterval + 60 * HourOf(dTime);
-    dNextInterval := fDate + iNextMin / (24 * 60);
-
-    //    iOldMin := iMin;
-    end;
-
-
-    (*     for i := 1 to 9 do sToken(sLine1, [cDelimiter], true);
-
-    iSum := iSum + StrToIntDef(sToken(sLine1, [cDelimiter], true), 0);
-    for i := 1 to 3 do sToken(sLine1, [cDelimiter], true);
-    iUVSum := iUVSum + StrToIntDef(sToken(sLine1, [cDelimiter], true), 0);
-    *)
-
-    iDataCol := 0;
-    while sLine <> '' do begin
-    s1 := sToken(sLine, [cDelimiter], true);
-    if lStrIsExtended(s1) then begin
-    aValues[iDataCol] := aValues[iDataCol] + StrToFloatDef(s1, 0);
-    inc(iDataCol);
-    end;
-    end;
-
-
-    inc(iCount);
-    inc(iLineCount);
-    sb1.Panels[0].Text := IntTOstr(iLineCount);
-    end;
-  }
 
   // finally
   closefile(fIn);
   // bbnSave.Enabled := true;
-  // cgdWerte.RowCount := cgdWerte.RowCount - 1;
+  cgdWerte.RowCount := cgdWerte.RowCount - 1;
 
 end;
 
@@ -523,7 +404,9 @@ end;
 
 (* *************************************************************************** *)
 
-procedure TfrmMediator.FormClose(Sender: TObject; var Action: TCloseAction);
+procedure TfrmMediator.FormClose(Sender: TObject;
+
+  var Action: TCloseAction);
 var
   fIni: TIniFile;
 begin
@@ -533,7 +416,7 @@ begin
     WriteString('Mediator', 'InputFile', feInput.Text);
     WriteString('Mediator', 'InputDir', feInput.InitialDir);
     WriteString('Mediator', 'SourceDir', deSource.Text);
-
+    WriteInteger('Mediator', 'FileType', cmbFiletype.ItemIndex);
     free;
   end;
 end;
@@ -583,20 +466,274 @@ begin
   end;
 
 end;
+(* ************************************************************************* *)
+
+Function TfrmMediator.dNextTimeStamp(dTS: TDateTime): TDateTime;
+var
+  iHour, iMinute, iSecond: integer;
+begin
+  case cmbAvInterval.ItemIndex of
+    0:
+      begin // 10 s
+
+      end;
+    1:
+      begin // 1 min
+        iHour := HourOf(dTS);
+        iMinute := MinuteOf(dTS);
+        if iMinute < 59 then
+          Result := int(dTS) + EncodeTime(iHour, iMinute + 1, 0, 0)
+        else
+        begin
+          if iHour < 22 then
+            Result := int(dTS) + EncodeTime(iHour + 1, 0, 0, 0)
+          else
+            Result := int(dTS) + 1 + EncodeTime(0, 0, 0, 0)
+
+        end;
+      end;
+    2:
+      begin // 5 min
+      end;
+    3:
+      begin // 10 min
+      end;
+    4:
+      begin // 30 min
+      end;
+    5:
+      begin // stundenweise
+        iHour := HourOf(dTS) + 1;
+        Result := int(dTS) + EncodeTime(iHour, 0, 0, 0);
+      end;
+  end;
+end;
+(* ************************************************************************* *)
+
+procedure TfrmMediator.btnAverageClick(Sender: TObject);
+var
+  iCol, iRow, iSrcRow, iValueCount: integer;
+  dTimestamp, dNewTimeStamp: TDateTime;
+  fValue, f: Extended;
+
+begin
+  with frmAverageResult.cgdAVGrid do
+  begin
+
+    RowCount := 2;
+    ColCount := cgdWerte.ColCount;
+    for iCol := 0 to cgdWerte.ColCount - 1 do
+      Cells[iCol, 0] := cgdWerte.Cells[iCol, 0];
+    for iCol := 1 to cgdWerte.ColCount - 1 do
+    begin
+      dTimestamp := StrToDateTime(cgdWerte.Cells[0, 1]);
+
+      dNewTimeStamp := dNextTimeStamp(dTimestamp);
+
+      Cells[0, 1] := FormatdateTime('dd.mm.yyyy hh:mm:ss', dNewTimeStamp);
+
+      fValue := 0;
+      iValueCount := 0;
+      iRow := 1;
+      for iSrcRow := 1 to cgdWerte.RowCount - 1 do
+      begin
+        dTimestamp := StrToDateTime(cgdWerte.Cells[0, iSrcRow]);
+        f := StrToFloatDef(cgdWerte.Cells[iCol, iSrcRow], NoFloat);
+        if f = NoFloat then
+        begin
+          showmessage('Error in Line ' + intTostr(iSrcRow));
+          exit;
+        end;
+
+        fValue := fValue + f;
+        inc(iValueCount);
+        if (dTimestamp = dNewTimeStamp) or (iSrcRow=cgdWerte.RowCount - 1) then // Grenze erreicht
+        begin
+          // Cells[iCol, RowCount - 1] := FloatTostr(fValue / iValueCount);
+          Cells[iCol, iRow] := FloatToStrF(fValue / iValueCount, ffFixed, 8,
+            _aPrecision[iCol]);
+          // alles mitteln
+          iValueCount := 0;
+          fValue := 0;
+          if iCol = 1 then
+          begin
+
+            dNewTimeStamp := dNextTimeStamp(dTimestamp);
+
+            RowCount := RowCount + 1;
+            inc(iRow);
+            Cells[0, iRow] := FormatdateTime('dd.mm.yyyy hh:mm:ss',
+              dNewTimeStamp);
+
+          end
+          else
+          begin
+            inc(iRow);
+            dNewTimeStamp := StrToDateTime(Cells[0, iRow]);
+          end;
+
+        end;
+
+      end;
+
+    end;
+    rowcount:=rowcount-1;
+    frmAverageResult.ShowModal;
+
+    {
+
+      slsLegende.free;
+      cgdWerte.ColCount := slsLegende.Count + 1;
+
+      for i := 1 to slsLegende.Count - 1 do
+      cgdWerte.Cells[i, 0] := slsLegende[i - 1];
+
+
+      // in welcher spalte steht die Zeit
+      iTimeCol := 0;
+
+      repeat
+      inc(iTimeCol);
+      sDatum := sToken(sLine, [cDelimiter], true);
+      //   if lStrIsDateTime(sDatum) then showmessage('Date');
+
+      try
+      dTime := StrToDateTime(sDatum);
+      //      showmessage(FormatDateTime('hh:nn:ss',dTime));
+      //    showmessage(FloatToStr(dTime);
+      //    showmessage(IntToStr(minuteof(dTime)));
+      iOldMin := minuteof(dTime) + 60 * HourOf(dTime);
+      i := trunc(minuteof(dTime) / iInterval) + 1;
+      iNextMin := i * iInterval + 60 * HourOf(dTime);
+      //      Showmessage(IntToStr(iOldMin)+ '  '+IntToStr(iNextMin));
+      dNextInterval := trunc(dTime) + iNextMin / (24 * 60);
+      //   showmessage(FormatDateTime('dd.mm.yyyy hh:nn:ss',dNextInterval));
+      bOK := true;
+      except
+      end;
+      until bOK;
+      iNumCount := 0; // so viele Spalten gibt es
+      while sLine <> '' do begin
+      s1 := stoken(sLine, [cDelimiter], true); // datum weg
+      if lStrIsExtended(s1) then inc(iNumCount);
+      end;
+      //   ShowMessage(IntToStr(iNumCount));
+      SetLength(aValues, iNumCount);
+
+      // jettzt gehts los
+      reset(fIn);
+      readln(fIn, sLine); // erste Zeile ist Legende
+      iLineCount := 0;
+      while not eof(fIn) do begin
+      readln(fIn, sLine);
+      i := 1;
+      while i < iTimeCol do begin
+      stoken(sLine, [cDelimiter], true); // ggf Laufnummern weg
+      inc(i);
+      end;
+      sDatum := sToken(sLine, [cDelimiter], true);
+      dTime := StrToDateTime(sDatum);
+      //     showmessage(FloatToStr(dTime));
+
+      iC := 1;
+
+      //   iMin := minuteof(dTime) + 60 * HourOf(dTime);
+      fDate := trunc(dTime);
+
+      // Falls eine neue Minute anbricht => alte wegschreiben
+
+      //   if iMin <> iOldMin then begin
+      if dTime > dNextInterval then begin
+      if iCount > 0 then begin
+
+      //    dTime := iMin / (24 * 60) + fDate;
+      if dNextInterval <= 1.0 then
+      sDatum := FormatDateTime('hh:nn:ss', dNextInterval)
+      else
+      sDatum := FormatDateTime('dd.mm.yyyy hh:nn:ss', dNextInterval);
+      cgdWerte.RowCount := cgdWerte.RowCount + 1;
+      iR := cgdWerte.RowCount - 2;
+      cgdWerte.Cells[0, iR] := IntToStr(iR);
+      cgdWerte.Cells[1, iR] := sDatum;
+      for i := 0 to iNumCount - 1 do begin
+      aValues[i] := aValues[i] / iCount;
+      cgdWerte.Cells[i + 2, iR] := FloatToStr(aValues[i]);
+      aValues[i] := 0;
+      end;
+      iCount := 0;
+    }
+
+    { //fSum := iSum / iCount;
+      //fUVSum := iUVSum / iCount;
+      iC := 1;
+      inc(iR);
+      if iR > 1 then
+      cgdWerte.RowCount := cgdWerte.RowCount + 1;
+      cgdWerte.Cells[0, iR] := IntToStr(cgdWerte.RowCount - 1);
+      while sLine <> '' do begin
+      case iC of
+      1: begin end;
+      12: begin
+      cgdWerte.Cells[iC, iR] := Format('%.0f', [fSum]);
+      sToken(sLine, [';'], true);
+      end;
+
+      17: begin
+      cgdWerte.Cells[iC, iR] := Format('%.0f', [fUVSum]);
+      sToken(sLine, [';'], true);
+      end;
+      else cgdWerte.Cells[iC, iR] := sToken(sLine, [cDelimiter], true);
+      end;
+      inc(iC);
+
+      end;
+    }{
+      end;
+      i := trunc(minuteof(dTime) / iInterval) + 1;
+      iNextMin := i * iInterval + 60 * HourOf(dTime);
+      dNextInterval := fDate + iNextMin / (24 * 60);
+
+      //    iOldMin := iMin;
+      end;
+
+
+      (*     for i := 1 to 9 do sToken(sLine1, [cDelimiter], true);
+
+      iSum := iSum + StrToIntDef(sToken(sLine1, [cDelimiter], true), 0);
+      for i := 1 to 3 do sToken(sLine1, [cDelimiter], true);
+      iUVSum := iUVSum + StrToIntDef(sToken(sLine1, [cDelimiter], true), 0);
+      *)
+
+      iDataCol := 0;
+      while sLine <> '' do begin
+      s1 := sToken(sLine, [cDelimiter], true);
+      if lStrIsExtended(s1) then begin
+      aValues[iDataCol] := aValues[iDataCol] + StrToFloatDef(s1, 0);
+      inc(iDataCol);
+      end;
+      end;
+
+
+      inc(iCount);
+      inc(iLineCount);
+      sb1.Panels[0].Text := IntTOstr(iLineCount);
+      end;
+    }
+  end;
+end;
 
 (* ************************************************************************* *)
 
 procedure TfrmMediator.btnFillGapsClick(Sender: TObject);
- Begin
-   FillGaps;
- End;
-
+Begin
+  Fillgaps;
+End;
 
 (* ************************************************************************* *)
-Procedure TfrmMediator.FillGaps;
+Procedure TfrmMediator.Fillgaps;
 var
-  iC, iR: integer;
-  fLastvalid, fFirstValid, fDiff: Extended;
+  i, iC, iR, iGapSize: integer;
+  fLastvalid, fFirstValid, fDiff, fValue: Extended;
 begin
   for iC := 1 to cgdWerte.ColCount - 1 do
   begin
@@ -604,14 +741,23 @@ begin
     while iR < cgdWerte.RowCount - 1 do
     begin
       if cgdWerte.Cells[iC, iR] = '' then
+
       begin
-        inc(iR);
-        // while cgdWerte.Cells[iC,iR]<>'' do
-        // inc(iR);
+        iGapSize := 0;
+        while (cgdWerte.Cells[iC, iR] = '') and (iR < cgdWerte.RowCount - 2) do
+        begin
+          inc(iR);
+          inc(iGapSize);
+        end;
         fFirstValid := StrToFloatDef(cgdWerte.Cells[iC, iR], NoFloat);
-        fDiff := (fFirstValid - fLastvalid) / 2;
-        cgdWerte.Cells[iC, iR - 1] := FloatToStrF(fLastvalid + fDiff, ffFixed,
-          8, _aPrecision[iC]);
+        fDiff := (fFirstValid - fLastvalid) / (iGapSize + 1);
+        fValue := fLastvalid;
+        for i := iR - iGapSize to iR - 1 do
+        begin
+          fValue := fValue + fDiff;
+          cgdWerte.Cells[iC, i] := FloatToStrF(fValue, ffFixed, 8,
+            _aPrecision[iC]);
+        end;
 
         // cgdWerte.Cells[iC, iR] := 'Gap'
       end;
@@ -627,7 +773,7 @@ end;
 procedure TfrmMediator.btnLoadClick(Sender: TObject);
 
 begin
- _iFileNo := 1;
+  _iFileNo := 1;
 
   Openfile(feInput.FileName);
 end;
@@ -636,7 +782,7 @@ procedure TfrmMediator.btnLoadFillGapSaveClick(Sender: TObject);
 
 var
   sr: TSearchRec;
-  s,sPath,sFN,sExt: string;
+  s, sPath, sFN, sExt: string;
 
 begin
   _iFileNo := 1;
@@ -644,22 +790,35 @@ begin
   if FindFirst(deSource.Text + '\*UV.*', faAnyfile, sr) = 0 then
     repeat
       s := sr.Name;
-      AnalyseFileName(s,sPath,sFN,sExt);
+      AnalyseFileName(s, sPath, sFN, sExt);
 
       if s[1] <> '.' then
       begin
+        sb1.Panels[0].Text := 'Load File' + s;
+
         Openfile(deSource.Text + '\' + s);
         inc(_iFileNo);
         Application.ProcessMessages;
         Fillgaps;
         Application.ProcessMessages;
-        SaveFile(deSource.Text+'\'+sFN+'_1.CSV');
+        SaveFile(deSource.Text + '\' + sFN + '_1.CSV');
 
       end;
     until FindNext(sr) <> 0;
 
   FindClose(sr);
-  sb1.Panels[0].Text:='Conversion finished'
+  sb1.Panels[0].Text := 'Conversion finished'
+end;
+
+procedure TfrmMediator.cmbFiletypeChange(Sender: TObject);
+begin
+  case cmbFiletype.ItemIndex of
+    4:
+      cmbInterval.ItemIndex := 0;
+  else
+    cmbInterval.ItemIndex := 1;
   end;
+
+end;
 
 end.
